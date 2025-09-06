@@ -1,0 +1,11 @@
+# ignore environment variable files
+.env
+
+# ignore virtual enviroment folder 
+.venv
+
+# ignore key file
+*.pem
+
+# ignore any folders
+*/

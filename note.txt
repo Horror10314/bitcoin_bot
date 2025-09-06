@@ -1,0 +1,16 @@
+taxonomy of trading ai plan: 
+=== task based taxonomy ===
+- single agent
+- sequential task
+- discrete time task
+- discrete action space / bit of continuous action space
+- a bit deterministic/ a bit stochastic environment
+- fully observable environment
+
+=== algorithm based taxonomy ===
+- on policy (maybe good to have improved rl) / off policy (maybe find new good way)
+- probably model-free / I could create a very simple model
+- temporal difference update
+- value based, policy based, actor critic
+- not sure fore DRL
+- online RL (highly probably)

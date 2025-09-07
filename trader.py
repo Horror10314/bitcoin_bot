@@ -1,9 +1,10 @@
 import logging
+import json
 
-from enum import Enum
 from dataclasses import dataclass
 from pybit.unified_trading import HTTP
 from pybit._helpers import is_usdt_perpetual, is_usdc_perpetual
+from decimal import Decimal
 
 MONTH = [
     "January"     ,
@@ -80,18 +81,21 @@ class Trader:
         self.session = HTTP(
             api_key=api_key,
             api_secret = api_secret,
-            rsa_authentication=rsa_auth,
+            rsa_authentication=rsa_auth,    
             testnet=testnet
         )
 
         self.success, self.test = successful(
-            self.session.get_instruments_info(category="linear", status="Trading")
+            self.session.get_positions(category="linear", symbol="BTCUSDT")
         )
+
+        print(json.dumps(self.test, indent=3))
         
-        if self.success:
-            for symbols in self.test["result"]["list"]:
-                if is_usdt_perpetual(symbols['symbol']):
-                    print(symbols['symbol'], ":", symbols['displayName'])
+        
+        # if self.success:
+        #     for symbols in self.test["result"]["list"]:
+        #         if is_usdt_perpetual(symbols['symbol']):
+        #             print(symbols['symbol'], ":", symbols['displayName'])
 
         self.__balance = TradeBalance(0,0,0)
         self.positions = []
@@ -113,18 +117,46 @@ class Trader:
     # > totalAvailableBalance	string	Account available balance (USD), Cross Margin: totalMarginBalance - totalInitialMargin
     # > totalPerpUPL	string	Account Perps and Futures unrealised p&l (USD): ∑Each Perp and USDC Futures upl by base coin
     # > totalInitialMargin	string	Account initial margin (USD): ∑Asset Total Initial Margin Base Coin
-    def get_available_balance(self):    pass
-    def get_margin_balance(self):       pass
-    def get_pnl(self):                  pass
-    def get_ordered_coins(self):        pass
-    def get_position(self):             pass
+    def get_wallet_balance(self) -> Decimal:
+        self.success, self.result = successful(
+            self.session.get_wallet_balance(accountType="UNIFIED")
+        )
+
+        if self.success:
+            return Decimal(self.result['result']['list'][0]['coin'][0]['walletBalance'])
+
+    def get_margin_balance(self):       
+        self.session.get_wallet_balance()
+
+    def get_available_balance(self) -> Decimal:
+        self.success, self.result = successful(
+            self.session.get_coins_balance(accountType="UNIFIED", coin="USDT")
+        )
+
+        if self.success:
+            return Decimal(self.result['result']['balance'][0]['transferBalance'])
+
+    def get_pnl(self):  
+        # get_positions(coin_name)             
+        pass
+    
+    def get_position(self):    
+        for symbol in self.positions:
+            self.session.get_positions(category="linear", symbol=symbol)   
+
+
+    def get_all_coins(self):
+        return self.positions
 
     # 선물 매매
     #   - 구매 
     #   - 판매
     #   using place_order
 
-    def buy_coin_future(self, coin_name, amount, order_type="Market"):
+    def buy_coin_future(self, coin_name, amount, leverage, order_type="Market"):
+        leverage = str(leverage)
+        self.session.set_leverage(category="linear", symbol=coin_name, buyLeverage=leverage, sellLeverage=leverage)
+        
         success, result = successful(self.session.place_order(
             category="linear",
             symbol=coin_name,
@@ -132,6 +164,9 @@ class Trader:
             orderType=order_type,
             qty=amount
         ))
+
+        self.positions.append(coin_name)
+
         return success
     
     def sell_coin_future(self, coin_name, order_type="Market"):
@@ -150,7 +185,7 @@ class Trader:
         self.logger.info("===== Tradier Starts =====")
 
         # main loop your main stratgy going here
-                
+        
 
         self.logger.info("=====  Trader Ends  =====")
 
@@ -171,7 +206,7 @@ def debug_main():
         rsa_private_key = f.read()
 
     # initialize the trader
-    #trader = Trader(api_key, rsa_private_key, logger=logging.getLogger(__name__))
+    trader = Trader(api_key, rsa_private_key, testnet=True, logger=logging.getLogger(__name__))
 
 
 if __name__ == "__main__":

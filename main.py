@@ -1,6 +1,5 @@
 import os
 import time
-import pandas as pd
 import logging
 import tkinter.ttk as ttk
 import tkinter.messagebox as msgbox
@@ -305,7 +304,6 @@ FRAME_PAD  = (5,5)
 FRAME_IPAD = (7,7)
 PLACEHODLER = "Value"
 
-
 class main_menu(Menu):
     def __init__(self, master, **kwargs):
         super().__init__(master, kwargs)
@@ -522,7 +520,7 @@ class coin_frame(LabelFrame):
         self.coin_price_label.pack()
         self.coin_list_box.pack()
         self.current_balance.pack(side="bottom")
-        self.current_margin_balance.pack(side="bottom")  
+        self.current_margin_balance.pack(side="bottom")
 
 
 class gui(Tk):
@@ -613,11 +611,11 @@ if __name__ == "__main__":
         rsa_private_key = f.read()
 
     # initialize the trader
-    #trader = Trader(api_key, rsa_private_key, logger=logging.getLogger(__name__))
+    trader = Trader(api_key, rsa_private_key, testnet=True, logger=logging.getLogger(__name__))
     
     # main loop
     #trader.trading_loop()
 
     # initializing tkinter
-    main = gui()
+    main = gui(trader)
     main.mainloop()

@@ -62,8 +62,6 @@ def successful(returns) -> tuple[bool, dict]:
     if isinstance(returns, dict):
         if returns[RETCODE] == SUC_RETCODE and returns[RETMSG].upper() in SUC_RETMSG:
             success = True
-            del returns[RETCODE]
-            del returns[RETMSG]
         else:
             returns = returns[RETMSG]
 
@@ -85,11 +83,9 @@ class Trader:
             testnet=testnet
         )
 
-        self.success, self.test = successful(
-            self.session.get_positions(category="linear", symbol="BTCUSDT")
-        )
-
-        print(json.dumps(self.test, indent=3))
+        # self.success, self.test = successful(
+        #     self.session.get_positions(category="linear", symbol=None, settleCoin="USDT")
+        # )
         
         
         # if self.success:
@@ -140,10 +136,17 @@ class Trader:
         # get_positions(coin_name)             
         pass
     
-    def get_position(self):    
-        for symbol in self.positions:
-            self.session.get_positions(category="linear", symbol=symbol)   
+    def get_position(self):
+        self.success, positions = successful(
+            self.session.get_positions(category="linear", symbol=None, settleCoin="USDT")
+        )
 
+        if self.success:
+            for pos in positions['result']['list']:
+                self.positions.append(pos['symbol'])
+        
+        return self.positions
+                
 
     def get_all_coins(self):
         return self.positions
@@ -164,8 +167,6 @@ class Trader:
             orderType=order_type,
             qty=amount
         ))
-
-        self.positions.append(coin_name)
 
         return success
     
@@ -206,7 +207,7 @@ def debug_main():
         rsa_private_key = f.read()
 
     # initialize the trader
-    trader = Trader(api_key, rsa_private_key, testnet=True, logger=logging.getLogger(__name__))
+    trader = Trader(api_key, rsa_private_key, testnet=False, logger=logging.getLogger(__name__))
 
 
 if __name__ == "__main__":

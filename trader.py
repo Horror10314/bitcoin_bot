@@ -1,10 +1,12 @@
 import logging
 import json
+import time
 
 from dataclasses import dataclass
 from pybit.unified_trading import HTTP
 from pybit._helpers import is_usdt_perpetual, is_usdc_perpetual
 from decimal import Decimal
+from peekqueue import PeekableQueue
 
 MONTH = [
     "January"     ,
@@ -68,37 +70,60 @@ def successful(returns) -> tuple[bool, dict]:
     return success, returns
 
 
-class Trader:
-    session: HTTP                           # connection with bitcon trading server
-    __balance: TradeBalance                 # balance info
-    positions: list[str]                    # or dict(coin name : info) trading info: position
-    trading_setting: dict[str, TradingSetting]   # or dict(coin name: TradingSetting) trading setting
-    logger: logging.Logger                  # logger for log
+class QueueItem:
+    def __init__(self, priority_time: int, handler: str):
+        self.priority_time = priority_time      # time is the id for priority queue 
+        self.handler = handler                  # key of handler lookup dictionary 
 
-    def __init__(self, api_key, api_secret, rsa_auth=True, testnet=False, logger=None):        
+    def __lt__(self, other):
+        return self.priority_time < other.priority_time
+
+    def __str__(self):
+        return f"Time interval {self.priority_time} with handler key of {self.handler}"
+    
+    def __isub__(self, other):
+        "decrease the priority time"
+        if isinstance(other, int):
+            self.priority_time -= other
+        elif isinstance(other, QueueItem):
+            self.priority_time -= other
+        else:
+            raise TypeError(f"Not supporint type for QueueItem: {type(other)}")
+        return self
+
+    # getters
+    def get_priority_time(self): return self.priority_time
+    def get_handler(self): return self.handler
+
+    # setters
+    def set_priority_time(self, time):         
+        self.priority_time = max(time, 0)
+    def set_handler(self, handler):
+        self.handler = handler
+
+class WorkItem(QueueItem):
+    def __init__(self, priority_time: int = 1, handler: str = "debug"): # or use *args
+        super().__init__(priority_time, handler)
+
+class CoinItem(QueueItem):
+    def __init__(self, coin_name: str, priority_time: int = 1, handler: str = "stat1"):
+        super().__init__(priority_time, handler)
+        self.coin_name = coin_name
+    
+    def __str__(self):
+        return super().__str__() + f", and coin name {self.coin_name}"
+
+
+class Trader:
+    def __init__(self, api_key, api_secret, rsa_auth=True, testnet=False):
         self.session = HTTP(
             api_key=api_key,
             api_secret = api_secret,
             rsa_authentication=rsa_auth,    
             testnet=testnet
         )
-
-        # self.success, self.test = successful(
-        #     self.session.get_positions(category="linear", symbol=None, settleCoin="USDT")
-        # )
-        
-        
-        # if self.success:
-        #     for symbols in self.test["result"]["list"]:
-        #         if is_usdt_perpetual(symbols['symbol']):
-        #             print(symbols['symbol'], ":", symbols['displayName'])
-
-        self.__balance = TradeBalance(0,0,0)
         self.positions = []
-        self.trading_setting = []
-        self.logger = logger
-
-
+    
     # 현재 정보
     #   - 현재 돈 (availaibe balance)
     #   - 현재 투자 가치 (margin balance)
@@ -136,21 +161,29 @@ class Trader:
         # get_positions(coin_name)             
         pass
     
-    def get_position(self):
+    def get_position(self, item):
         self.success, positions = successful(
             self.session.get_positions(category="linear", symbol=None, settleCoin="USDT")
         )
 
+        # create list of only symbols of positions
+        position_symbols = []
         if self.success:
             for pos in positions['result']['list']:
-                self.positions.append(pos['symbol'])
-        
-        return self.positions
+                position_symbols.append(pos['symbol'])
+
+        # add new symbol if new position is added
+        for pos in position_symbols:
+            if pos not in self.positions:
+                self.positions.append(pos)
+
+        # remove closed position symbols
+        for pos in self.positions:
+            if pos not in position_symbols:
+                self.positions.remove(pos)
+
+        print(self.positions)
                 
-
-    def get_all_coins(self):
-        return self.positions
-
     # 선물 매매
     #   - 구매 
     #   - 판매
@@ -178,25 +211,66 @@ class Trader:
             orderType=order_type,
         ))
         return success
+    
 
-    # 종료 및 시작 기능
-    #   - 종료
-    #   - 메인 루프
-    def trading_loop(self):
-        self.logger.info("===== Tradier Starts =====")
-
-        # main loop your main stratgy going here
-        
-
-        self.logger.info("=====  Trader Ends  =====")
-
-    def kill(self):
+    # 전략 구현
+    def strategy1(self, item: QueueItem):
         pass
+
+
+class MainWorker:
+    trader: Trader
+    handlers: dict                          # dict[str, func] dictionary of functions for callback, these fuctions may return
+    work_queue: PeekableQueue[QueueItem]
+    logger: logging.Logger                  # logger for log
+
+    def __init__(self, trader: Trader, logger: logging.Logger):        
+        self.trader = trader
+        self.handlers = {
+            "debug": lambda x: print(f"This is debuging with item: {x}"),
+            "check": self.trader.get_position,
+            "stat1": self.trader.strategy1,
+        }
+        self.work_queue = PeekableQueue()
+        self.logger = logger
+
+        # initialize the queue with checking position item
+        self.work_queue.put(WorkItem(5, "check"))
+        self.work_queue.put(WorkItem(5, "debug"))
+
+
+    def mainloop(self):
+        task: QueueItem
+        default_time = 5
+
+        try:
+            # main loop
+            while True:
+                # wait 
+                time.sleep(self.work_queue.peek_first().get_priority_time())
+                # time to do work
+                self.work_queue.decrease(self.work_queue.peek_first().get_priority_time())
+
+                # do all works that has same priority
+                while self.work_queue.peek_first().get_priority_time() == 0:
+                    task = self.work_queue.get()
+
+                    # call handler (and do stuff)
+                    ret = self.handlers[task.get_handler()](task)
+                    if ret is not None:     # means handler returned queueItem
+                        pass
+
+                    # add back to work_queue
+                    task.set_priority_time(default_time)
+                    self.work_queue.put(task)
+
+        except KeyboardInterrupt:
+                print("exit")
+
 
 
 # debugging purpose
 def debug_main():
-    #import json
     import os
     from dotenv import load_dotenv
 
@@ -207,7 +281,11 @@ def debug_main():
         rsa_private_key = f.read()
 
     # initialize the trader
-    trader = Trader(api_key, rsa_private_key, testnet=False, logger=logging.getLogger(__name__))
+    trader = Trader(api_key, rsa_private_key, testnet=False)
+    worker = MainWorker(trader, logger=logging.getLogger(__name__))
+
+    worker.mainloop()
+
 
 
 if __name__ == "__main__":

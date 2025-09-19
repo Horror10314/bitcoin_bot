@@ -1,14 +1,12 @@
-import os
 import time
-import logging
+import os
 import tkinter.ttk as ttk
-import tkinter.messagebox as msgbox
 
-from trader import Trader, numeric_to_string_month
-from dotenv import load_dotenv
-from pathlib import Path
+from trader import numeric_to_string_month
 from tkinter import *
-from multiprocessing import Queue
+
+import customtkinter
+from abc import *
 
 # window size 
 window_width = 640
@@ -274,6 +272,115 @@ class gui(Tk):
         self.order_frame._pack_widgets(FRAME_PAD, FRAME_IPAD)
 
 
+class FrameInterface(metaclass=ABCMeta):
+    @abstractmethod
+    def grid_widgets(self):
+        pass
+
+class SideNavigationFrame(FrameInterface, customtkinter.CTkFrame):
+    def __init__(self, master, **kwargs):
+        super().__init__(master, **kwargs)
+
+        # add widgets here
+        self.master = master
+
+
+        self.home_button = customtkinter.CTkButton(self, corner_radius=0, height=40, border_spacing=10, text="Default Setting",
+                                                   fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
+                                                   anchor="w", command=self.home_button_event)
+
+
+        self.frame_2_button = customtkinter.CTkButton(self, corner_radius=0, height=40, border_spacing=10, text="Specific Setting",
+                                                      fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
+                                                      anchor="w", command=self.frame_2_button_event)
+
+        self.appearance_mode_menu = customtkinter.CTkOptionMenu(self, values=["Light", "Dark"],
+                                                                command=self.change_appearance_mode_event)
+        
+        # select default frame
+        self.select_frame_by_name("Default Setting")
+
+    def grid_widgets(self):
+        self.grid(row=0, column=0, sticky="nsew")
+        self.grid_rowconfigure(4, weight=1)
+        self.home_button.grid(row=1, column=0, sticky="ew")
+        self.frame_2_button.grid(row=2, column=0, sticky="ew")
+        self.appearance_mode_menu.grid(row=6, column=0, padx=20, pady=20, sticky="s")
+
+    def change_appearance_mode_event(self, new_appearance_mode):
+        customtkinter.set_appearance_mode(new_appearance_mode)
+
+    def home_button_event(self):
+        self.select_frame_by_name("Default Setting")
+
+    def frame_2_button_event(self):
+        self.select_frame_by_name("Specific Setting")
+
+    def select_frame_by_name(self, name):
+        # set button color for selected button
+        self.home_button.configure(fg_color=("gray75", "gray25") if name == "home" else "transparent")
+        self.frame_2_button.configure(fg_color=("gray75", "gray25") if name == "frame_2" else "transparent")
+
+        # show selected frame
+        # if name == "Default Setting":
+        #     self.master.home_frame.grid(row=0, column=1, sticky="nsew")
+        # else:
+        #     self.master.home_frame.grid_forget()
+        # if name == "Specific Setting":
+        #     self.master.second_frame.grid(row=0, column=1, sticky="nsew")
+        # else:
+        #     self.master.second_frame.grid_forget()
+
+class DefaultSettingFrame(FrameInterface, customtkinter.CTkFrame):
+    def __init__(self, master, **kwargs):
+        super().__init__(master, **kwargs, corner_radius=0)
+
+        # add widgets here
+    
+    def grid_widgets(self):
+        print('asdfsad')
+
+class SpecificSettingFrame(FrameInterface, customtkinter.CTkFont):
+    def __init__(self, master, **kwargs):
+        super().__init__(master, **kwargs)
+
+        # add widgets here
+
+    def grid_widgets(self):
+        print('asdfadsf')
+
+class App(customtkinter.CTk):
+    def __init__(self):
+        super().__init__()
+
+        # set the window 
+        self.title("Bitcoin")
+        self.geometry("700x450")
+        # set grid layout 1x2
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=1)
+
+        # navigation frame
+        self.side_nav = SideNavigationFrame(self)
+        self.side_nav.grid_widgets()
+
+        # create defalut setting frame
+        self.home_frame = customtkinter.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        self.home_frame.grid_columnconfigure(0, weight=1)
+
+        self.home_frame_button_1 = customtkinter.CTkButton(self.home_frame, text="home frame")
+        self.home_frame_button_1.grid(row=1, column=0, padx=20, pady=10)
+        
+
+        # create specific coin setting frame
+        self.second_frame = customtkinter.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        self.home_frame.grid_columnconfigure(0, weight=1)
+
+        self.second_frame_button = customtkinter.CTkButton(self.second_frame, text="second frame")
+        self.second_frame_button.grid(row=1, column=0, padx=20, pady=10)
+
+
+
 def set_log_file_path(current_time: time.struct_time):
     # get month name
     month = numeric_to_string_month(current_time.tm_mon)
@@ -305,5 +412,9 @@ if __name__ == "__main__":
 
 
     # initializing tkinter
-    main = gui()
-    main.mainloop()
+    # main = gui()
+    # main.mainloop()
+    
+    app = App()
+    app.mainloop()
+

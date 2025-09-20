@@ -102,16 +102,18 @@ class QueueItem:
         self.handler = handler
 
 class WorkItem(QueueItem):
-    def __init__(self, priority_time: int = 1, handler: str = "debug"): # or use *args
+    def __init__(self, priority_time: int = 1, handler: str = "check"): # or use *args
         super().__init__(priority_time, handler)
 
 class CoinItem(QueueItem):
-    def __init__(self, coin_name: str, priority_time: int = 1, handler: str = "stat1"):
+    def __init__(self, coin_entry_price: Decimal, coin_qty: Decimal, coin_name: str, priority_time: int = 2, handler: str = "stat1"):
         super().__init__(priority_time, handler)
         self.coin_name = coin_name
+        self.coin_qty = coin_qty
+        self.coin_entry_price = coin_entry_price
     
     def __str__(self):
-        return super().__str__() + f", and coin name {self.coin_name}"
+        return super().__str__() + f", coin entry price {self.coin_entry_price}, coin qty {self.coin_qty}, and coin name {self.coin_name}"
 
 
 class Trader:
@@ -123,13 +125,6 @@ class Trader:
             testnet=testnet
         )
         self.positions = []
-    
-    # 현재 정보
-    #   - 현재 돈 (availaibe balance)
-    #   - 현재 투자 가치 (margin balance)
-    #   - 현재 이득 (P&L)
-    #   - 현재 산 코인 들
-    #   - 각 코인의 포지션
 
     # using get_wallet_balance
     # 
@@ -157,32 +152,40 @@ class Trader:
         if self.success:
             return Decimal(self.result['result']['balance'][0]['transferBalance'])
 
-    def get_pnl(self):  
-        # get_positions(coin_name)             
-        pass
-    
-    def get_position(self, item):
-        self.success, positions = successful(
+    def get_live_positions(self):
+        self.success, new_positions = successful(
             self.session.get_positions(category="linear", symbol=None, settleCoin="USDT")
         )
-
-        # create list of only symbols of positions
-        position_symbols = []
         if self.success:
-            for pos in positions['result']['list']:
-                position_symbols.append(pos['symbol'])
+            return new_positions['result']['list']
+    
+    def get_live_position(self, coin_name):
+        self.success, new_positions = successful(
+            self.session.get_positions(category="linear", symbol=coin_name, settleCoin="USDT")
+        )
+        if self.success:
+            return new_positions['result']['list']
+    
+    def update_position(self, work_queue: PeekableQueue, current_task: QueueItem):
+        self.success, new_positions = successful(
+            self.session.get_positions(category="linear", symbol=None, settleCoin="USDT")
+        )
+        # create list of only symbols of positions
+        if self.success:
+            # update positions
+            self.positions = new_positions['result']['list']
 
-        # add new symbol if new position is added
-        for pos in position_symbols:
-            if pos not in self.positions:
-                self.positions.append(pos)
-
-        # remove closed position symbols
-        for pos in self.positions:
-            if pos not in position_symbols:
-                self.positions.remove(pos)
-
-        print(self.positions)
+            # record new position for adding queue
+            for new_pos in self.positions:
+                newtask = CoinItem(Decimal(new_pos['avgPrice']), Decimal(new_pos['size']), new_pos['symbol'])
+                work_queue.put(newtask)
+    
+        print(f"This is checking position of doing{current_task}")
+        print(f"Current positions: {[pos['symbol'] for pos in self.positions]}")
+            
+        # add checking position work back to queue
+        current_task.set_priority_time(5)
+        work_queue.put(current_task)
                 
     # 선물 매매
     #   - 구매 
@@ -214,8 +217,29 @@ class Trader:
     
 
     # 전략 구현
-    def strategy1(self, item: QueueItem):
-        pass
+    def strategy1(self, work_queue: PeekableQueue, current_task: QueueItem):
+        print(f"This is strategy 1 with doing {current_task}")
+        current_task: CoinItem = current_task   # using child class pointer
+
+        # final check before activate strategy
+        cur_pos =self.get_live_position(current_task.coin_name)
+        if cur_pos['size'] == 0:
+            return
+        
+        # ======= TODO =========
+        # 내가 구입한 가격 얻기 
+        # 내가 구입한 코인의 qty얻기
+        # 현재 시장가 얻기
+        
+        # 시장가가 원하는 이득에 상승하면 익절
+        # 시장가가 (설정한) 반대로 하락하면 
+        #   - 추가 롱채결 ()
+        #   - 익절 가격 조절 (새 평단 + 원래 익절 간격)
+
+        # 시장가가 손절 가격 까지 가면 자동 손절. (또는 사용자가 수동으로 bybit웹/앱에서 손절 가능)
+
+        # 그사이면 아무것도 안함
+
 
 
 class MainWorker:
@@ -228,7 +252,7 @@ class MainWorker:
         self.trader = trader
         self.handlers = {
             "debug": lambda x: print(f"This is debuging with item: {x}"),
-            "check": self.trader.get_position,
+            "check": self.trader.update_position,
             "stat1": self.trader.strategy1,
         }
         self.work_queue = PeekableQueue()
@@ -236,13 +260,10 @@ class MainWorker:
 
         # initialize the queue with checking position item
         self.work_queue.put(WorkItem(5, "check"))
-        self.work_queue.put(WorkItem(5, "debug"))
 
 
     def mainloop(self):
         task: QueueItem
-        default_time = 5
-
         try:
             # main loop
             while True:
@@ -256,21 +277,15 @@ class MainWorker:
                     task = self.work_queue.get()
 
                     # call handler (and do stuff)
-                    ret = self.handlers[task.get_handler()](task)
-                    if ret is not None:     # means handler returned queueItem
-                        pass
-
-                    # add back to work_queue
-                    task.set_priority_time(default_time)
-                    self.work_queue.put(task)
-
+                    self.handlers[task.get_handler()](self.work_queue, task)
+                    
         except KeyboardInterrupt:
                 print("exit")
 
 
 
 # debugging purpose
-def debug_main():
+def main():
     import os
     from dotenv import load_dotenv
 
@@ -289,4 +304,4 @@ def debug_main():
 
 
 if __name__ == "__main__":
-    debug_main()
+    main()

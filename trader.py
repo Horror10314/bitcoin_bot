@@ -1,10 +1,12 @@
 import logging
 import json
 import time
+import socket
+import threading
+import struct
 
 from dataclasses import dataclass
 from pybit.unified_trading import HTTP
-from pybit._helpers import is_usdt_perpetual, is_usdc_perpetual
 from decimal import Decimal
 from peekqueue import PeekableQueue
 
@@ -27,6 +29,19 @@ MONTH = [
 def numeric_to_string_month(month):
     """num: 1-12, this function returns the name of the month in string based on number"""
     return MONTH[month - 1]
+
+
+def set_log_file_path(current_time: time.struct_time):
+    # get month name
+    month = numeric_to_string_month(current_time.tm_mon)
+
+    # create log file name of current time
+    log_file_name = f"{current_time.tm_year}-{current_time.tm_mon}-{current_time.tm_mday}.log"
+    
+    # set the folder of the file to be year and month
+    log_path = f"./log/{current_time.tm_year}/{month}/" + log_file_name
+
+    return log_path
 
 
 @dataclass
@@ -101,9 +116,11 @@ class QueueItem:
     def set_handler(self, handler):
         self.handler = handler
 
+
 class WorkItem(QueueItem):
     def __init__(self, priority_time: int = 1, handler: str = "check"): # or use *args
         super().__init__(priority_time, handler)
+
 
 class CoinItem(QueueItem):
     def __init__(self, coin_entry_price: Decimal, coin_qty: Decimal, coin_name: str, priority_time: int = 2, handler: str = "stat1"):
@@ -119,10 +136,10 @@ class CoinItem(QueueItem):
 class Trader:
     def __init__(self, api_key, api_secret, rsa_auth=True, testnet=False):
         self.session = HTTP(
+            testnet=testnet,
             api_key=api_key,
             api_secret = api_secret,
-            rsa_authentication=rsa_auth,    
-            testnet=testnet
+            rsa_authentication=rsa_auth
         )
         self.positions = []
 
@@ -222,9 +239,9 @@ class Trader:
         current_task: CoinItem = current_task   # using child class pointer
 
         # final check before activate strategy
-        cur_pos =self.get_live_position(current_task.coin_name)
-        if cur_pos['size'] == 0:
-            return
+        # cur_pos = self.get_live_position(current_task.coin_name)
+        # if Decimal(cur_pos['size']) == 0:
+        #     return
         
         # ======= TODO =========
         # 내가 구입한 가격 얻기 
@@ -241,14 +258,21 @@ class Trader:
         # 그사이면 아무것도 안함
 
 
-
 class MainWorker:
     trader: Trader
     handlers: dict                          # dict[str, func] dictionary of functions for callback, these fuctions may return
     work_queue: PeekableQueue[QueueItem]
     logger: logging.Logger                  # logger for log
+    server_sock: socket.socket
+
 
     def __init__(self, trader: Trader, logger: logging.Logger):        
+        
+        # ============================ socket part ===================================
+        self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+
+        # ============================ worker part ===================================
         self.trader = trader
         self.handlers = {
             "debug": lambda x: print(f"This is debuging with item: {x}"),
@@ -258,9 +282,14 @@ class MainWorker:
         self.work_queue = PeekableQueue()
         self.logger = logger
 
+        # ======================== initialization =====================================
         # initialize the queue with checking position item
         self.work_queue.put(WorkItem(5, "check"))
+        self.stop_event = threading.Event()
 
+        # create server thread
+        self.server_thread = threading.Thread(target=self.server_loop, args=[self.stop_event])
+        self.server_thread.start()
 
     def mainloop(self):
         task: QueueItem
@@ -278,11 +307,67 @@ class MainWorker:
 
                     # call handler (and do stuff)
                     self.handlers[task.get_handler()](self.work_queue, task)
+
+                    self.work_queue.task_done()
                     
         except KeyboardInterrupt:
                 print("exit")
+                self.exit()
+    
+    # destructor, kind of.
+    def exit(self):
+        # 소켓 및 스레드 정리
+        self.stop_event.set()
+        self.server_sock.close()
 
 
+    # ===================================================== network method =======================================================
+    
+    
+    # ========= 공통: 길이프리픽스 송수신 =========
+    def send_msg(self, payload: dict):
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.server_sock.sendall(struct.pack("!I", len(data)) + data)
+
+    def recv_msg(self) -> dict:
+        data = self.server_sock.recv(1024)
+        return json.loads(data.decode("utf-8"))
+
+
+    def server_loop(self, stop_event: threading.Event): # this server gonna be reply server
+        self.server_sock.bind(("localhost", 55555))
+        self.server_sock.listen(0)
+        
+        #self.server_sock.settimeout(2.5)  # 주기적으로 stop_event 확인
+        
+        print("Thread opened successful")
+
+        while not stop_event.is_set():
+            try:
+                client_sock, addr = self.server_sock.accept()
+            except socket.timeout:
+                continue
+
+            with client_sock:
+                client_sock.settimeout(3.0)
+                
+                try:
+                    while True:
+                        
+                        # ========= main communication with client here
+                        try:
+                            data = client_sock.recv(65535).decode("utf-8")
+                        except socket.timeout:
+                            continue
+                        
+                        print(f"Client sent: {data}")
+                        client_sock.send(json.dumps({"post": "successful"}, ensure_ascii=False).encode("utf-8"))
+
+                except (ConnectionError, json.JSONDecodeError) as e:
+                    print(f"[server] client disconnected: {e}")
+                finally:
+                    print("[server] session closed; waiting next client...")
+                    
 
 # debugging purpose
 def main():
@@ -292,13 +377,19 @@ def main():
     load_dotenv()   # load environment file
     with open(os.getenv("API_KEY_PATH"), "r") as f:
         api_key = f.read()
-    with open(os.getenv("PRIVATE_KEY_PATH"), "r") as f:
+    with open(os.getenv("PRIVATE_KEY_PATH"), "r") as f: 
         rsa_private_key = f.read()
 
+    with open("default.json", "r", encoding="utf-8") as default_json_file:
+        default_setting = json.load(default_json_file)
+
+        print(json.dumps(default_setting, indent=3))
+
     # initialize the trader
-    trader = Trader(api_key, rsa_private_key, testnet=False)
+    trader = Trader(api_key, rsa_private_key, testnet=True)
     worker = MainWorker(trader, logger=logging.getLogger(__name__))
 
+    #worker.mainloop()
     worker.mainloop()
 
 

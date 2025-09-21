@@ -1,19 +1,30 @@
-import time
-
-from trader import numeric_to_string_month
-from tkinter import *
-
 import customtkinter
-
+import json
+import socket
+import struct
 
 # window size 
 window_width = 900
 window_height = 700
 
+def send_msg(sock: socket.socket, payload: dict):
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    sock.sendall(struct.pack("!I", len(data)) + data)
+
+def recv_msg(sock: socket.socket) -> dict:
+    data = sock.recv(1024)
+    return json.loads(data.decode("utf-8"))
+
 class App(customtkinter.CTk):
     def __init__(self):
         super().__init__()
 
+        # ============================ network connection setting for ipc with trader.py ========================================
+        self.HOST, self.PORT = "localhost", 55555
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.connect((self.HOST, self.PORT))
+
+        # ================================================= UI part ===============================================================        
         self.title("Bitcoin Trader Manager v1")
         self.geometry(f"{window_width}x{window_height}")
 
@@ -56,20 +67,64 @@ class App(customtkinter.CTk):
         # Time interval
         # 적용 버튼
 
+        with open("default.json", "r", encoding="utf-8") as default_setting:
+            self.default_setting = json.load(default_setting)
+
         # create frame
         self.mainview = customtkinter.CTkFrame(self.home_frame, width=250)
         self.mainview.pack(expand=True, fill="both", padx=(20, 20), pady=(20, 20))
+        self.mainview.grid_rowconfigure(5, weight=1)
+        self.mainview.grid_columnconfigure(4, weight=1)
 
-        self.label_tab_2 = customtkinter.CTkLabel(self.mainview, text="CTkLabel on Tab 2")
-        self.optionmenu_1 = customtkinter.CTkOptionMenu(self.mainview, dynamic_resizing=False,
-                                                        values=["Value 1", "Value 2", "Value Long Long Long"])
-        self.optionmenu_1.grid(row=0, column=0, padx=20, pady=(20, 10))
-        self.combobox_1 = customtkinter.CTkComboBox(self.mainview,
-                                                    values=["Value 1", "Value 2", "Value Long....."])
-        self.combobox_1.grid(row=1, column=0, padx=20, pady=(10, 10))
-        self.string_input_button = customtkinter.CTkButton(self.mainview, text="Open CTkInputDialog",
-                                                           command=self.open_input_dialog_event)
-        self.string_input_button.grid(row=2, column=0, padx=20, pady=(10, 10))
+        title_font = customtkinter.CTkFont(family="System", size=20, weight="bold")
+
+        customtkinter.CTkLabel(self.mainview, text="기본 설정", font=title_font).grid(row=0, column=0, padx=20, pady=(10, 5)) # title
+
+        # self.default_upper_bound_label = customtkinter.CTkLabel(self.mainview, text="익절가: ")
+        # self.default_upper_bound_label.grid(row=1, column=0, padx=20, pady=(10, 10))
+        # self.default_upper_bound_entry = customtkinter.CTkEntry(self.mainview)
+        # self.default_upper_bound_entry.grid(row=1, column=1, padx=(0, 20), pady=(10, 10))
+
+        
+        # self.default_lower_bound_label = customtkinter.CTkLabel(self.mainview, text="하한가: ")
+        # self.default_lower_bound_label.grid(row=2, column=0, padx=20, pady=(0,10))
+        # self.default_upper_bound_entry = customtkinter.CTkEntry(self.mainview)
+        # self.default_upper_bound_entry.grid(row=2, column=1, padx=(0, 20), pady=(0, 10))
+
+
+        # self.default_stop_loss_label = customtkinter.CTkLabel(self.mainview, text="손절가: ")
+        # self.default_stop_loss_label.grid(row=3, column=0, padx=20, pady=(0,10))  
+        # self.default_upper_bound_entry = customtkinter.CTkEntry(self.mainview)
+        # self.default_upper_bound_entry.grid(row=3, column=1, padx=(0, 20), pady=(0, 10))
+
+
+        self.default_frequency_label = customtkinter.CTkLabel(self.mainview, text="포지션 확인 빈도: ")
+        self.default_frequency_label.grid(row=1, column=0, padx=20, pady=(10,10))
+        self.default_frequency_entry = customtkinter.CTkEntry(self.mainview, placeholder_text=str(self.default_setting['frequency'])+"초")
+        self.default_frequency_entry.grid(row=1, column=1, padx=(0, 20), pady=(10, 10))
+
+        self.strategy_list = ["전술 1"]
+
+        self.default_stratagy_label = customtkinter.CTkLabel(self.mainview, text="기본 코인 전략: ")
+        self.default_stratagy_label.grid(row=2, column=0, padx=20, pady=(0,10))
+        self.default_stratagy_combobox = customtkinter.CTkComboBox(self.mainview, values=self.strategy_list)
+        self.default_stratagy_combobox.grid(row=2, column=1, padx=(0, 20), pady=(0, 10))
+
+
+        self.default_apply_butten = customtkinter.CTkButton(self.mainview, text="적용", command=self.send_default_setting_request) 
+        self.default_apply_butten.grid(row=5, column=4, padx=20, pady=(0, 20), sticky="se")
+
+
+        # self.label_tab_2 = customtkinter.CTkLabel(self.mainview, text="CTkLabel on Tab 2")
+        # self.optionmenu_1 = customtkinter.CTkOptionMenu(self.mainview, dynamic_resizing=False,
+        #                                                 values=["Value 1", "Value 2", "Value Long Long Long"])
+        # self.optionmenu_1.grid(row=0, column=3, padx=20, pady=(20, 10))
+        # self.combobox_1 = customtkinter.CTkComboBox(self.mainview,
+        #                                             values=["Value 1", "Value 2", "Value Long....."])
+        # self.combobox_1.grid(row=1, column=3, padx=20, pady=(10, 10))
+        # self.string_input_button = customtkinter.CTkButton(self.mainview, text="Open CTkInputDialog",
+        #                                                    command=self.open_input_dialog_event)
+        # self.string_input_button.grid(row=2, column=3, padx=20, pady=(10, 10))
 
         
         # ================================================= create second frame =================================================
@@ -86,22 +141,56 @@ class App(customtkinter.CTk):
         # create frame
         self.mainview2 = customtkinter.CTkFrame(self.second_frame, width=250)
         self.mainview2.pack(expand=True, fill="both", padx=(20, 20), pady=(20, 20))
+        self.mainview2.grid_rowconfigure(6, weight=1)
+        self.mainview2.grid_columnconfigure(4, weight=1)
 
-        self.mainview2_coin_list = ["BTCUSDT", "ETHUSDT", "YFIUSDT"] # TODO implement ipc for communicatinf with trader.py
+        customtkinter.CTkLabel(self.mainview2, text="코인 설정", font=title_font).grid(row=0, column=0, padx=20, pady=(10, 5)) # title
 
-        self.label_tab_2 = customtkinter.CTkLabel(self.mainview2, text="Select Coin: ")
-        self.label_tab_2.grid(row=0, column=0, padx=3, pady=(10, 10))
-        self.combobox_1 = customtkinter.CTkComboBox(self.mainview2,
-                                                    values=self.mainview2_coin_list)
-        self.combobox_1.grid(row=0, column=1, padx=(0, 20), pady=(10, 10))
-
+        self.coin_list_literal = "코인을 선택하세요"
+        self.mainview2_coin_list = ["btcusdt", "ethusdt"] # TODO implement ipc for communicatinf with trader.py / use  send_get_coin_symbols_request()
         
-        self.string_input_button = customtkinter.CTkButton(self.mainview2, text="Open CTkInputDialog",
-                                                           command=self.open_input_dialog_event)
-        self.string_input_button.grid(row=2, column=0, padx=20, pady=(10, 10))
+        self.coin_list_literal = "포지션 없음" if not self.mainview2_coin_list else self.coin_list_literal
+
+        self.coin_select_label = customtkinter.CTkLabel(self.mainview2, text="코인 선택: ")
+        self.coin_select_label.grid(row=1, column=0, padx=20, pady=(10, 10))
+        self.coin_combobox = customtkinter.CTkComboBox(self.mainview2, values=self.mainview2_coin_list, command=self.send_get_coin_setting_request)
+        self.coin_combobox.grid(row=1, column=1, padx=(0, 20), pady=(10, 10))
+        self.coin_combobox.set(self.coin_list_literal)
+
+        # add widgets only if postion is not empty 
+        if self.mainview2_coin_list:
+            self.upper_bound_label = customtkinter.CTkLabel(self.mainview2, text="익절가: ")
+            self.upper_bound_label.grid(row=2, column=0, padx=20, pady=(0, 10))
+            self.upper_bound_entry = customtkinter.CTkEntry(self.mainview2)
+            self.upper_bound_entry.grid(row=2, column=1, padx=(0, 20), pady=(0, 10))
+
+            
+            self.lower_bound_label = customtkinter.CTkLabel(self.mainview2, text="하한가: ")
+            self.lower_bound_label.grid(row=3, column=0, padx=20, pady=(0,10))
+            self.lower_bound_entry = customtkinter.CTkEntry(self.mainview2)
+            self.lower_bound_entry.grid(row=3, column=1, padx=(0, 20), pady=(0, 10))
 
 
-        # ================================================= any other setting =================================================
+            self.stop_loss_label = customtkinter.CTkLabel(self.mainview2, text="손절가: ")
+            self.stop_loss_label.grid(row=4, column=0, padx=20, pady=(0,10))  
+            self.stop_loss_entry = customtkinter.CTkEntry(self.mainview2)
+            self.stop_loss_entry.grid(row=4, column=1, padx=(0, 20), pady=(0, 10))
+
+
+            self.frequency_label = customtkinter.CTkLabel(self.mainview2, text="코인 확인 빈도: ")
+            self.frequency_label.grid(row=5, column=0, padx=20, pady=(0,10))
+            self.frequency_entry = customtkinter.CTkEntry(self.mainview2)
+            self.frequency_entry.grid(row=5, column=1, padx=(0, 20), pady=(0, 10))
+
+            self.apply_butten = customtkinter.CTkButton(self.mainview2, text="적용", command=self.send_coin_setting_request) 
+            self.apply_butten.grid(row=6, column=4, padx=20, pady=(0, 20), sticky="se")
+
+        # self.string_input_button = customtkinter.CTkButton(self.mainview2, text="Open CTkInputDialog",
+        #                                                    command=self.open_input_dialog_event)
+        # self.string_input_button.grid(row=6, column=0, padx=20, pady=(10, 10))
+
+
+        # ================================================= any other initial setting =================================================
         # select default frame
         self.select_frame_by_name("Default Setting")
 
@@ -134,20 +223,29 @@ class App(customtkinter.CTk):
         customtkinter.set_appearance_mode(new_appearance_mode)
 
 
-def set_log_file_path(current_time: time.struct_time):
-    # get month name
-    month = numeric_to_string_month(current_time.tm_mon)
+    # ======================================== network methods ===========================================================
+    # communicating with trader.py
+    def send_default_setting_request(self):
+        print("im sending something to trader.py")
 
-    # create log file name of current time
-    log_file_name = f"{current_time.tm_year}-{current_time.tm_mon}-{current_time.tm_mday}.log"
-    
-    # set the folder of the file to be year and month
-    log_path = f"./log/{current_time.tm_year}/{month}/" + log_file_name
+    def send_coin_setting_request(self):
+        print("im sending coin thing to trader.py")
 
-    return log_path
+    def send_get_coin_symbols_request(self):
+        pass
+
+    def send_get_coin_setting_request(self, choice):
+        self.sock.send(json.dumps({"get": choice}, ensure_ascii=False).encode("utf-8"))
+
+        msg = self.sock.recv(65535)
+
+        print(f"Client recievd: {msg.decode("utf-8")}")
+
+        
+
 
 
 if __name__ == "__main__":
     app = App()
     app.mainloop()
-
+    app.sock.close()

@@ -311,13 +311,13 @@ class MainWorker:
                     self.work_queue.task_done()
                     
         except KeyboardInterrupt:
+                self.stop_event.set()
                 print("exit")
-                self.exit()
-    
+                
+
     # destructor, kind of.
     def exit(self):
         # 소켓 및 스레드 정리
-        self.stop_event.set()
         self.server_sock.close()
 
 
@@ -333,6 +333,14 @@ class MainWorker:
         data = self.server_sock.recv(1024)
         return json.loads(data.decode("utf-8"))
 
+    def do_get_request_task(self, result, what):
+        print('hjhfdhgdjhgd')
+        if what == 'symbols':
+            result += {'symbols': self.trader.positions}
+            
+
+    def do_set_request_task(self, result, what):
+        pass
 
     def server_loop(self, stop_event: threading.Event): # this server gonna be reply server
         self.server_sock.bind(("localhost", 55555))
@@ -356,17 +364,29 @@ class MainWorker:
                         
                         # ========= main communication with client here
                         try:
-                            data = client_sock.recv(65535).decode("utf-8")
+                            data = json.loads(client_sock.recv(65535).decode("utf-8"))
                         except socket.timeout:
                             continue
-                        
-                        print(f"Client sent: {data}")
-                        client_sock.send(json.dumps({"post": "successful"}, ensure_ascii=False).encode("utf-8"))
+
+                        result = {
+                            "ret": "success",
+                        }
+                        # parse the request
+                        match data['req']:
+                            case 'get':
+                                self.do_get_request_task(result, data['what'])
+                            case 'set':
+                                self.do_set_request_task(result, data['what'])
+                            case _:
+                                result = {'ret' : 'fail', 'err': 'invalid requst'}
+                
+                        client_sock.send(json.dumps(result, ensure_ascii=False).encode("utf-8"))
 
                 except (ConnectionError, json.JSONDecodeError) as e:
                     print(f"[server] client disconnected: {e}")
                 finally:
                     print("[server] session closed; waiting next client...")
+                    self.exit()
                     
 
 # debugging purpose

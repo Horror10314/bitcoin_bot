@@ -206,6 +206,7 @@ class App(customtkinter.CTk):
             self.home_frame.grid_forget()
         if name == "Specific Setting":
             self.second_frame.grid(row=0, column=1, sticky="nsew")
+            self.send_get_coin_symbols_request()
         else:
             self.second_frame.grid_forget()
     
@@ -232,10 +233,27 @@ class App(customtkinter.CTk):
         print("im sending coin thing to trader.py")
 
     def send_get_coin_symbols_request(self):
-        pass
+        request = {
+            "req" : "get",
+            "what" : "symbols"
+        }
+        self.sock.send(json.dumps(request, ensure_ascii=False).encode())
+
+        msg = self.sock.recv(65535).decode()
+
+        # if msg['ret'] == 'success':
+        #     self.mainview2_coin_list = msg['symbols']
+
+        print(msg)
+        print(type(msg))
 
     def send_get_coin_setting_request(self, choice):
-        self.sock.send(json.dumps({"get": choice}, ensure_ascii=False).encode("utf-8"))
+        request = {
+            "req" : "get",
+            "what": choice,
+        }
+
+        self.sock.send(json.dumps(request, ensure_ascii=False).encode())
 
         msg = self.sock.recv(65535)
 

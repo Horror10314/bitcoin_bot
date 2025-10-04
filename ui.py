@@ -205,8 +205,8 @@ class App(customtkinter.CTk):
         else:
             self.home_frame.grid_forget()
         if name == "Specific Setting":
-            self.second_frame.grid(row=0, column=1, sticky="nsew")
             self.send_get_coin_symbols_request()
+            self.second_frame.grid(row=0, column=1, sticky="nsew")
         else:
             self.second_frame.grid_forget()
     
@@ -228,9 +228,36 @@ class App(customtkinter.CTk):
     # communicating with trader.py
     def send_default_setting_request(self):
         print("im sending something to trader.py")
+        request = {
+            "req" : "set",
+            "what": "default"
+        }
+        # get all setting data in the frame
+        
+
+        # then send
+        self.sock.send(json.dumps(request, ensure_ascii=False).encode())
+        msg = json.loads(self.sock.recv(65535).decode())
+
+        if msg['ret'] == 'success':
+            pass
+
 
     def send_coin_setting_request(self):
         print("im sending coin thing to trader.py")
+        request = {
+            "req" : "set",
+            "what": self.coin_combobox.get() # get current values
+        }
+        # get all setting data in the frame
+
+        # then send
+        self.sock.send(json.dumps(request, ensure_ascii=False).encode())
+        msg = json.loads(self.sock.recv(65535).decode())
+
+        if msg['ret'] == 'success':
+            pass
+
 
     def send_get_coin_symbols_request(self):
         request = {
@@ -239,13 +266,14 @@ class App(customtkinter.CTk):
         }
         self.sock.send(json.dumps(request, ensure_ascii=False).encode())
 
-        msg = self.sock.recv(65535).decode()
+        msg = json.loads(self.sock.recv(65535).decode())
 
-        # if msg['ret'] == 'success':
-        #     self.mainview2_coin_list = msg['symbols']
+        if msg['ret'] == 'success':
+            self.mainview2_coin_list = msg['symbols']
+            self.coin_combobox.configure(values=self.mainview2_coin_list)
+            self.coin_combobox.update()
+            self.coin_combobox.set('')
 
-        print(msg)
-        print(type(msg))
 
     def send_get_coin_setting_request(self, choice):
         request = {
@@ -255,12 +283,12 @@ class App(customtkinter.CTk):
 
         self.sock.send(json.dumps(request, ensure_ascii=False).encode())
 
-        msg = self.sock.recv(65535)
+        msg = json.loads(self.sock.recv(65535).decode())
 
-        print(f"Client recievd: {msg.decode("utf-8")}")
+        if msg['ret'] == 'success':
+            pass
 
         
-
 
 
 if __name__ == "__main__":

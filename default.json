@@ -1,0 +1,16 @@
+{
+    "upperbound": {
+        "value": 10,
+        "unit": "$"
+    },
+    "lowerbound": {
+        "value": 10,
+        "unit": "$"
+    },
+    "stoploss": {
+        "value": 10,
+        "unit": "%"
+    },
+    "frequency": 1,
+    "strategy": "strat1"
+}

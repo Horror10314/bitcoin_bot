@@ -10,6 +10,25 @@ from pybit.unified_trading import HTTP
 from decimal import Decimal
 from peekqueue import PeekableQueue
 
+default_json = """
+{
+    "upperbound": {
+        "value": 10,
+        "unit": "$"
+    },
+    "lowerbound": {
+        "value": 10,
+        "unit": "$"
+    },
+    "stoploss": {
+        "value": 10,
+        "unit": "%"
+    },
+    "frequency": 1,
+    "strategy": "strat1"
+}
+"""
+
 MONTH = [
     "January"     ,
     "February"    ,
@@ -265,7 +284,6 @@ class MainWorker:
     logger: logging.Logger                  # logger for log
     server_sock: socket.socket
 
-
     def __init__(self, trader: Trader, logger: logging.Logger):        
         
         # ============================ socket part ===================================
@@ -279,6 +297,7 @@ class MainWorker:
             "check": self.trader.update_position,
             "stat1": self.trader.strategy1,
         }
+        self.settings = []
         self.work_queue = PeekableQueue()
         self.logger = logger
 
@@ -333,14 +352,27 @@ class MainWorker:
         data = self.server_sock.recv(1024)
         return json.loads(data.decode("utf-8"))
 
-    def do_get_request_task(self, result, what):
-        print('hjhfdhgdjhgd')
-        if what == 'symbols':
-            result += {'symbols': self.trader.positions}
+    def do_get_request_task(self, result, data):
+        print(self.trader.positions)
+        if data['what'] == 'symbols':
+            result['symbols'] = [coin['symbol'] for coin in self.trader.positions]
             
+    def do_set_request_task(self, result, data):
+        if data['what'] == "default":
+            # do setting
+            default_setting = json.loads(default_json)
 
-    def do_set_request_task(self, result, what):
-        pass
+            # do something like default_setting["upperbound"] = 1
+            
+            default_json = json.dumps(default_setting)
+            
+            # update json file
+            with open('default.json', 'w') as change_setting:
+                change_setting.write(default_json)
+            
+        elif data['what'] in self.trader.positions:
+            # do setting
+            pass
 
     def server_loop(self, stop_event: threading.Event): # this server gonna be reply server
         self.server_sock.bind(("localhost", 55555))
@@ -374,11 +406,11 @@ class MainWorker:
                         # parse the request
                         match data['req']:
                             case 'get':
-                                self.do_get_request_task(result, data['what'])
+                                self.do_get_request_task(result, data)
                             case 'set':
-                                self.do_set_request_task(result, data['what'])
+                                self.do_set_request_task(result, data)
                             case _:
-                                result = {'ret' : 'fail', 'err': 'invalid requst'}
+                                result = {'ret' : 'fail'}
                 
                         client_sock.send(json.dumps(result, ensure_ascii=False).encode("utf-8"))
 
@@ -406,7 +438,7 @@ def main():
         print(json.dumps(default_setting, indent=3))
 
     # initialize the trader
-    trader = Trader(api_key, rsa_private_key, testnet=True)
+    trader = Trader(api_key, rsa_private_key, testnet=False)
     worker = MainWorker(trader, logger=logging.getLogger(__name__))
 
     #worker.mainloop()

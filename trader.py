@@ -10,25 +10,6 @@ from pybit.unified_trading import HTTP
 from decimal import Decimal
 from peekqueue import PeekableQueue
 
-default_json = """
-{
-    "upperbound": {
-        "value": 10,
-        "unit": "$"
-    },
-    "lowerbound": {
-        "value": 10,
-        "unit": "$"
-    },
-    "stoploss": {
-        "value": 10,
-        "unit": "%"
-    },
-    "frequency": 1,
-    "strategy": "strat1"
-}
-"""
-
 MONTH = [
     "January"     ,
     "February"    ,
@@ -215,7 +196,7 @@ class Trader:
             for new_pos in self.positions:
                 newtask = CoinItem(Decimal(new_pos['avgPrice']), Decimal(new_pos['size']), new_pos['symbol'])
                 work_queue.put(newtask)
-    
+        
         print(f"This is checking position of doing{current_task}")
         print(f"Current positions: {[pos['symbol'] for pos in self.positions]}")
             
@@ -284,7 +265,7 @@ class MainWorker:
     logger: logging.Logger                  # logger for log
     server_sock: socket.socket
 
-    def __init__(self, trader: Trader, logger: logging.Logger):        
+    def __init__(self, trader: Trader, setting: dict, logger: logging.Logger):        
         
         # ============================ socket part ===================================
         self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -297,9 +278,11 @@ class MainWorker:
             "check": self.trader.update_position,
             "stat1": self.trader.strategy1,
         }
-        self.settings = []
         self.work_queue = PeekableQueue()
         self.logger = logger
+
+        self.default_setting = setting
+        self.coin_settings = {}
 
         # ======================== initialization =====================================
         # initialize the queue with checking position item
@@ -328,7 +311,17 @@ class MainWorker:
                     self.handlers[task.get_handler()](self.work_queue, task)
 
                     self.work_queue.task_done()
-                    
+                
+                # udpate: add coin in the setting list
+                for pos in self.trader.positions:
+                    if pos['symbol'] not in self.coin_settings.keys():
+                        self.coin_settings[pos['symbol']] = self.default_setting
+
+                # update: remove coin in the setting list
+                for coin in self.coin_settings.keys():
+                    if coin not in [pos['symbol'] for pos in self.trader.positions]:
+                        del self.coin_settings[coin]
+
         except KeyboardInterrupt:
                 self.stop_event.set()
                 print("exit")
@@ -356,29 +349,31 @@ class MainWorker:
         print(self.trader.positions)
         if data['what'] == 'symbols':
             result['symbols'] = [coin['symbol'] for coin in self.trader.positions]
+        
+        else: # get coin setting
+            result['setting'] = self.coin_settings[data['what']]
             
-    def do_set_request_task(self, result, data):
-        if data['what'] == "default":
-            # do setting
-            default_setting = json.loads(default_json)
 
-            # do something like default_setting["upperbound"] = 1
-            
-            default_json = json.dumps(default_setting)
-            
+    def do_set_request_task(self, result, data):
+        if data['what'] == "default":            
             # update json file
-            with open('default.json', 'w') as change_setting:
-                change_setting.write(default_json)
-            
+            with open('default.json', 'w') as setting_file:
+                # nothing else to change except frquency.
+                self.default_setting['frequency'] = int(data['change'])
+
+                # update
+                json.dump(self.default_setting, setting_file, ensure_ascii=False, indent=4)
+
         elif data['what'] in self.trader.positions:
             # do setting
-            pass
+            self.coin_settings[data['what']] = data['change']
+
 
     def server_loop(self, stop_event: threading.Event): # this server gonna be reply server
         self.server_sock.bind(("localhost", 55555))
         self.server_sock.listen(0)
         
-        #self.server_sock.settimeout(2.5)  # 주기적으로 stop_event 확인
+        self.server_sock.settimeout(5)  # 주기적으로 stop_event 확인
         
         print("Thread opened successful")
 
@@ -418,7 +413,8 @@ class MainWorker:
                     print(f"[server] client disconnected: {e}")
                 finally:
                     print("[server] session closed; waiting next client...")
-                    self.exit()
+        else:
+            self.exit()
                     
 
 # debugging purpose
@@ -439,7 +435,7 @@ def main():
 
     # initialize the trader
     trader = Trader(api_key, rsa_private_key, testnet=False)
-    worker = MainWorker(trader, logger=logging.getLogger(__name__))
+    worker = MainWorker(trader, default_setting, logger=logging.getLogger(__name__))
 
     #worker.mainloop()
     worker.mainloop()

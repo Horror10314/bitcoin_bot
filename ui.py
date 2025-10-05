@@ -7,6 +7,26 @@ import struct
 window_width = 900
 window_height = 700
 
+def make_setting(upper_val, lower_val, stoploss, upper_unit="$", lower_unit="$", stoploss_unit="$", frequency=1, strategy="strat1"):
+    setting =  {
+        "upperbound": {
+            "value": upper_val,
+            "unit": upper_unit
+        },
+        "lowerbound": {
+            "value": lower_val,
+            "unit": lower_unit
+        },
+        "stoploss": {
+            "value": stoploss,
+            "unit": stoploss_unit
+        },
+        "frequency": frequency,
+        "strategy": strategy
+    }
+
+    return setting
+
 def send_msg(sock: socket.socket, payload: dict):
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     sock.sendall(struct.pack("!I", len(data)) + data)
@@ -232,15 +252,16 @@ class App(customtkinter.CTk):
             "req" : "set",
             "what": "default"
         }
+
         # get all setting data in the frame
-        
+        request['change'] = int(self.default_frequency_entry.get())
 
         # then send
         self.sock.send(json.dumps(request, ensure_ascii=False).encode())
         msg = json.loads(self.sock.recv(65535).decode())
-
+        
         if msg['ret'] == 'success':
-            pass
+            self.default_frequency_entry.delete(0, "end")
 
 
     def send_coin_setting_request(self):
@@ -251,12 +272,22 @@ class App(customtkinter.CTk):
         }
         # get all setting data in the frame
 
+        request['change'] = make_setting(
+            int(self.upper_bound_entry.get()),
+            int(self.lower_bound_entry.get()),
+            int(self.stop_loss_entry.get()),
+            int(self.frequency_entry.get())
+        )
+        
         # then send
         self.sock.send(json.dumps(request, ensure_ascii=False).encode())
         msg = json.loads(self.sock.recv(65535).decode())
 
         if msg['ret'] == 'success':
-            pass
+            self.upper_bound_entry.delete(0, "end")
+            self.lower_bound_entry.delete(0, "end")
+            self.stop_loss_entry.delete(0, "end")
+            self.frequency_entry.delete(0, "end")
 
 
     def send_get_coin_symbols_request(self):
@@ -270,9 +301,10 @@ class App(customtkinter.CTk):
 
         if msg['ret'] == 'success':
             self.mainview2_coin_list = msg['symbols']
-            self.coin_combobox.configure(values=self.mainview2_coin_list)
-            self.coin_combobox.update()
-            self.coin_combobox.set('')
+            if self.mainview2_coin_list:
+                self.coin_combobox.configure(values=self.mainview2_coin_list)
+                self.coin_combobox.update()
+                self.coin_combobox.set('')
 
 
     def send_get_coin_setting_request(self, choice):
@@ -282,13 +314,13 @@ class App(customtkinter.CTk):
         }
 
         self.sock.send(json.dumps(request, ensure_ascii=False).encode())
-
         msg = json.loads(self.sock.recv(65535).decode())
 
         if msg['ret'] == 'success':
-            pass
-
-        
+            self.upper_bound_entry.configure(placeholder_text=msg['setting']['upperbound']['value'])
+            self.lower_bound_entry.configure(placeholder_text=msg['setting']['lowerbound']['value'])
+            self.stop_loss_entry.configure(placeholder_text=msg['setting']['stoploss']['value'])
+            self.frequency_entry.configure(placeholder_text=msg['setting']['frequency'])
 
 
 if __name__ == "__main__":

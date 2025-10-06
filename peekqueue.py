@@ -25,7 +25,8 @@ class PeekableQueue(PriorityQueue):
     def decrease(self, sub):
         "decrease the all priority values in the queue by sub"
         for item in self.queue:
-            item -= sub
+            if item:
+                item -= sub
 
     def peek_first(self):
         with self.mutex:

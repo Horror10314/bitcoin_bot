@@ -165,45 +165,55 @@ class App(customtkinter.CTk):
         self.mainview2.grid_columnconfigure(4, weight=1)
 
         customtkinter.CTkLabel(self.mainview2, text="코인 설정", font=title_font).grid(row=0, column=0, padx=20, pady=(10, 5)) # title
-
-        self.coin_list_literal = "코인을 선택하세요"
-        self.mainview2_coin_list = ["btcusdt", "ethusdt"] # TODO implement ipc for communicatinf with trader.py / use  send_get_coin_symbols_request()
         
-        self.coin_list_literal = "포지션 없음" if not self.mainview2_coin_list else self.coin_list_literal
+        self.coin_list_literal = "코인을 선택하세요"
+        self.mainview2_coin_list = []
 
         self.coin_select_label = customtkinter.CTkLabel(self.mainview2, text="코인 선택: ")
         self.coin_select_label.grid(row=1, column=0, padx=20, pady=(10, 10))
         self.coin_combobox = customtkinter.CTkComboBox(self.mainview2, values=self.mainview2_coin_list, command=self.send_get_coin_setting_request)
         self.coin_combobox.grid(row=1, column=1, padx=(0, 20), pady=(10, 10))
+        
         self.coin_combobox.set(self.coin_list_literal)
 
         # add widgets only if postion is not empty 
-        if self.mainview2_coin_list:
-            self.upper_bound_label = customtkinter.CTkLabel(self.mainview2, text="익절가: ")
-            self.upper_bound_label.grid(row=2, column=0, padx=20, pady=(0, 10))
-            self.upper_bound_entry = customtkinter.CTkEntry(self.mainview2)
-            self.upper_bound_entry.grid(row=2, column=1, padx=(0, 20), pady=(0, 10))
+        self.upper_bound_label = customtkinter.CTkLabel(self.mainview2, text="익절가: ")
+        self.upper_bound_label.grid(row=2, column=0, padx=20, pady=(0, 10))
+        self.upper_bound_entry = customtkinter.CTkEntry(self.mainview2)
+        self.upper_bound_entry.grid(row=2, column=1, padx=(0, 20), pady=(0, 10))
 
-            
-            self.lower_bound_label = customtkinter.CTkLabel(self.mainview2, text="하한가: ")
-            self.lower_bound_label.grid(row=3, column=0, padx=20, pady=(0,10))
-            self.lower_bound_entry = customtkinter.CTkEntry(self.mainview2)
-            self.lower_bound_entry.grid(row=3, column=1, padx=(0, 20), pady=(0, 10))
+        self.upper_bound_unit_list = ["%", "$"]
+        self.upper_bound_unit = customtkinter.CTkComboBox(self.mainview2, values=self.upper_bound_unit_list)
+        self.upper_bound_unit.grid(row=2, column=2, padx=(0, 20), pady=(0, 10))
+
+        
+        self.lower_bound_label = customtkinter.CTkLabel(self.mainview2, text="하한가: ")
+        self.lower_bound_label.grid(row=3, column=0, padx=20, pady=(0,10))
+        self.lower_bound_entry = customtkinter.CTkEntry(self.mainview2)
+        self.lower_bound_entry.grid(row=3, column=1, padx=(0, 20), pady=(0, 10))
+                    
+        self.lower_bound_unit_list = ["%", "$"]
+        self.lower_bound_unit = customtkinter.CTkComboBox(self.mainview2, values=self.lower_bound_unit_list)
+        self.lower_bound_unit.grid(row=3, column=2, padx=(0, 20), pady=(0, 10))
 
 
-            self.stop_loss_label = customtkinter.CTkLabel(self.mainview2, text="손절가: ")
-            self.stop_loss_label.grid(row=4, column=0, padx=20, pady=(0,10))  
-            self.stop_loss_entry = customtkinter.CTkEntry(self.mainview2)
-            self.stop_loss_entry.grid(row=4, column=1, padx=(0, 20), pady=(0, 10))
+        self.stop_loss_label = customtkinter.CTkLabel(self.mainview2, text="손절가: ")
+        self.stop_loss_label.grid(row=4, column=0, padx=20, pady=(0,10))  
+        self.stop_loss_entry = customtkinter.CTkEntry(self.mainview2)
+        self.stop_loss_entry.grid(row=4, column=1, padx=(0, 20), pady=(0, 10))
+
+        self.stop_loss_unit_list = ["%", "$"]
+        self.stop_loss_unit = customtkinter.CTkComboBox(self.mainview2, values=self.stop_loss_unit_list)
+        self.stop_loss_unit.grid(row=4, column=2, padx=(0,20), pady=(0,10))
 
 
-            self.frequency_label = customtkinter.CTkLabel(self.mainview2, text="코인 확인 빈도: ")
-            self.frequency_label.grid(row=5, column=0, padx=20, pady=(0,10))
-            self.frequency_entry = customtkinter.CTkEntry(self.mainview2)
-            self.frequency_entry.grid(row=5, column=1, padx=(0, 20), pady=(0, 10))
+        self.frequency_label = customtkinter.CTkLabel(self.mainview2, text="코인 확인 빈도: ")
+        self.frequency_label.grid(row=5, column=0, padx=20, pady=(0,10))
+        self.frequency_entry = customtkinter.CTkEntry(self.mainview2)
+        self.frequency_entry.grid(row=5, column=1, padx=(0, 20), pady=(0, 10))
 
-            self.apply_butten = customtkinter.CTkButton(self.mainview2, text="적용", command=self.send_coin_setting_request) 
-            self.apply_butten.grid(row=6, column=4, padx=20, pady=(0, 20), sticky="se")
+        self.apply_butten = customtkinter.CTkButton(self.mainview2, text="적용", command=self.send_coin_setting_request) 
+        self.apply_butten.grid(row=6, column=4, padx=20, pady=(0, 20), sticky="se")
 
         # self.string_input_button = customtkinter.CTkButton(self.mainview2, text="Open CTkInputDialog",
         #                                                    command=self.open_input_dialog_event)
@@ -262,6 +272,8 @@ class App(customtkinter.CTk):
         
         if msg['ret'] == 'success':
             self.default_frequency_entry.delete(0, "end")
+            self.default_frequency_entry.configure(placeholder_text=str(request['change'])+"초")
+            self.focus_set()
 
 
     def send_coin_setting_request(self):
@@ -289,6 +301,8 @@ class App(customtkinter.CTk):
             self.stop_loss_entry.delete(0, "end")
             self.frequency_entry.delete(0, "end")
 
+            self.focus_set()
+
 
     def send_get_coin_symbols_request(self):
         request = {
@@ -304,7 +318,9 @@ class App(customtkinter.CTk):
             if self.mainview2_coin_list:
                 self.coin_combobox.configure(values=self.mainview2_coin_list)
                 self.coin_combobox.update()
-                self.coin_combobox.set('')
+                
+                self.coin_list_literal = "포지션 없음" if not self.mainview2_coin_list else "코인을 선택하세요"
+                self.coin_combobox.set(self.coin_list_literal)
 
 
     def send_get_coin_setting_request(self, choice):
@@ -322,6 +338,9 @@ class App(customtkinter.CTk):
             self.stop_loss_entry.configure(placeholder_text=msg['setting']['stoploss']['value'])
             self.frequency_entry.configure(placeholder_text=msg['setting']['frequency'])
 
+            self.upper_bound_unit.set(msg['setting']['upperbound']['unit'])
+            self.lower_bound_unit.set(msg['setting']['lowerbound']['unit'])
+            self.stop_loss_unit.set(msg['setting']['stoploss']['unit'])
 
 if __name__ == "__main__":
     app = App()

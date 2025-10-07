@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pybit.unified_trading import HTTP
 from decimal import Decimal
 from peekqueue import PeekableQueue
+import pybit.exceptions
+import requests.exceptions
 
 MONTH = [
     "January"     ,
@@ -186,26 +188,36 @@ class Trader:
             return new_positions['result']['list']
     
     def update_position(self, work_queue: PeekableQueue, current_task: WorkItem, setting: dict[str, dict]):
-        self.success, new_positions = successful(
-            self.session.get_positions(category="linear", symbol=None, settleCoin="USDT")
-        )
+        try:
+            self.success, new_positions = successful(
+                self.session.get_positions(category="linear", symbol=None, settleCoin="USDT")
+            )
+        except requests.exceptions.ReadTimeout as e:
+            # print("Timeout Error: wait for next time")
+            current_task.set_priority_time(setting['frequency'])
+            work_queue.put(current_task)
+            return
+
         # create list of only symbols of positions
         if self.success:
             # update positions
             new_positions = new_positions['result']['list']
 
+            temp = [pos['symbol'] for pos in self.positions]
+
             # record new position for adding queue
             for new_pos in new_positions:
                 # add to queue if new position is added
-                if new_pos['symbol'] not in [pos['symbol'] for pos in self.positions]:
-                    with threading.Lock():
+                with threading.Lock():
+                    if new_pos['symbol'] not in temp:
+                        # print(Decimal(new_pos['avgPrice']))
                         newtask = CoinItem(Decimal(new_pos['avgPrice']), Decimal(new_pos['size']), new_pos['symbol'], new_pos['side'] == "Buy", priority_time=setting['frequency'])
                         work_queue.put(newtask)
             
             self.positions = new_positions
 
-        print(f"This is checking position of doing{current_task}")
-        print(f"Current positions: {[pos['symbol'] for pos in self.positions]}")
+        # # print(f"This is checking position of doing{current_task}")
+        # print(f"Current positions: {[pos['symbol'] for pos in self.positions]}")
             
         # add checking position work back to queue
         current_task.set_priority_time(setting['frequency'])
@@ -216,33 +228,42 @@ class Trader:
     #   - 판매
     #   using place_order
 
-    def buy_coin_future(self, coin_name, amount, leverage, order_type="Market"):
+    def buy_coin_future(self, coin_name, amount, leverage, side, order_type="Market"):
         leverage = str(leverage)
-        self.session.set_leverage(category="linear", symbol=coin_name, buyLeverage=leverage, sellLeverage=leverage)
-        
-        success, result = successful(self.session.place_order(
-            category="linear",
-            symbol=coin_name,
-            side="Buy",
-            orderType=order_type,
-            qty=amount
-        ))
+        #self.session.set_leverage(category="linear", symbol=coin_name, buyLeverage=leverage, sellLeverage=leverage)
+        try:
+            success = self.session.place_order(
+                category="linear",
+                symbol=coin_name,
+                side=side,
+                orderType=order_type,
+                qty=amount
+            )
+        except pybit.exceptions.InvalidRequestError as e:
+            return
+            # print(e)
 
-        return success
+        # return success
     
-    def sell_coin_future(self, coin_name, order_type="Market"):
-        success, result = successful(self.session.place_order(
-            category="linear",
-            symbol=coin_name,
-            side="Sell",
-            orderType=order_type,
-        ))
-        return success
+    def sell_coin_future(self, coin_name, side, qty, order_type="Market"):
+        try:
+            self.session.place_order(
+                category="linear",
+                symbol=coin_name,
+                side=side,
+                orderType=order_type,
+                reduceOnly=True,
+                qty=qty
+            )
+        except pybit.exceptions.InvalidRequestError as e:
+            return
+            # print(e)
+        # return success
     
 
     # 전략 구현
     def strategy1(self, work_queue: PeekableQueue, current_task: CoinItem, setting: dict):
-        print(f"This is strategy 1 with doing {current_task}")
+        ## print(f"This is strategy 1 with doing {current_task}")
         
         # 내가 구입한 가격 얻기 
         # 내가 구입한 코인의 qty얻기
@@ -256,49 +277,65 @@ class Trader:
         # 시장가가 손절 가격 까지 가면 자동 손절. (또는 사용자가 수동으로 bybit웹/앱에서 손절 가능)
 
         # 그사이면 아무것도 안함
-        pos = self.get_live_position(current_task.coin_name)
+        sold = False
+        sell_side = "Sell" if current_task.long else "Buy"
+        buy_side = "Buy" if current_task.long else "Sell"
 
+        pos = self.get_live_position(current_task.coin_name)[0]
         if Decimal(pos['size']) > 0:
-
             # calculate price
-            upperbound_price = current_task.coin_entry_price + Decimal(setting['upperbound']['value'])\
+            upperbound_price = Decimal(pos['avgPrice']) + Decimal(setting['upperbound']['value'])\
                                 if setting['upperbound']['unit'] == "$"\
-                                else current_task.coin_entry_price + current_task.coin_entry_price * Decimal(setting['upperbound']['value']) /100
+                                else current_task.coin_entry_price + current_task.coin_entry_price * Decimal('0.01') * Decimal(setting['upperbound']['value'])
             
-            lowerbound_price = current_task.coin_entry_price + Decimal(setting['lowerbound']['value'])\
+            lowerbound_price = Decimal(pos['avgPrice']) - Decimal(setting['lowerbound']['value'])\
                                 if setting['lowerbound']['unit'] == "$"\
-                                else current_task.coin_entry_price + current_task.coin_entry_price * Decimal(setting['lowerbound']['value']) /100
+                                else current_task.coin_entry_price + current_task.coin_entry_price * Decimal('0.01') * Decimal(setting['lowerbound']['value'])
             
-            stoploss_price = current_task.coin_entry_price - Decimal(setting['stoploss']['value']) \
+            stoploss_price = Decimal(setting['stoploss']['value']) \
                                 if setting['stoploss']['unit'] == "$"\
-                                else current_task.coin_entry_price - current_task.coin_entry_price * Decimal(setting['stoploss']['value']) / 100
+                                else current_task.coin_entry_price * Decimal('0.01') * Decimal(setting['stoploss']['value'])
+
+            stoploss_price = current_task.coin_entry_price - stoploss_price if current_task.long else current_task.coin_entry_price + stoploss_price
 
             cur_price = Decimal(pos['markPrice'])
-
-
-            # execute strategy
-            if cur_price < stoploss_price:  
-                self.sell_coin_future(current_task.coin_name)
-            elif cur_price > upperbound_price:
-                if current_task.long:   
-                    # made a profit
-                    self.sell_coin_future(current_task.coin_name)
-                else:
-                    # continue strategy
-                    self.buy_coin_future(current_task.coin_name, str(current_task.coin_qty * 2))
-            elif cur_price < lowerbound_price:
-                if current_task.long:
-                    #continue continue strategy
-                    self.buy_coin_future(current_task.coin_name, str(current_task.coin_qty * 2))
-                else: 
-                    # made a profit
-                    self.sell_coin_future(current_task.coin_name)
-            # else:
-            #     do nothing
+            try:
+                # execute strategy
+                if current_task.long:               # long
+                    if cur_price <= stoploss_price:
+                        # print("손절ㅠㅠㅠㅠㅠㅠ", cur_price)
+                        self.sell_coin_future(current_task.coin_name, sell_side, pos['size'])
+                        sold=True
+                    elif cur_price >= upperbound_price:
+                        # print("이득!!!!!!!!", cur_price)
+                        self.sell_coin_future(current_task.coin_name, sell_side, pos['size'])    # don't go futher than this or make profit\
+                        sold=True
+                    elif cur_price <= lowerbound_price:
+                        # print("계획되로...", cur_price)
+                        self.buy_coin_future(current_task.coin_name, str(Decimal(pos['size']) * 2), pos['leverage'], buy_side)
+                    # else:
+                        # print("아직 대기중 ", cur_price)
+                else:                               # short
+                    if cur_price >= stoploss_price:
+                        # print("손절ㅠㅠㅠㅠㅠㅠ", cur_price)
+                        self.sell_coin_future(current_task.coin_name, sell_side, pos['size'])
+                        sold=True
+                    elif cur_price <= lowerbound_price:
+                        # print("이득!!!!!!!!", cur_price)
+                        self.sell_coin_future(current_task.coin_name, sell_side, pos['size'])    # don't go futher than this or make profit
+                        sold=True
+                    elif cur_price >= upperbound_price:
+                        # print("계획되로...", cur_price)
+                        self.buy_coin_future(current_task.coin_name, str(Decimal(pos['size']) * 2), pos['leverage'], buy_side)
+                    # else:
+                        # print("아직 대기중", cur_price)
+            except Exception:
+                sold = False
 
         # put the task back to queue
-        current_task.set_priority_time(setting['frequency'])
-        work_queue.put(current_task)
+        if not sold:
+            current_task.set_priority_time(setting['frequency'])
+            work_queue.put(current_task)
 
 
 class MainWorker:
@@ -317,7 +354,7 @@ class MainWorker:
         # ============================ worker part ===================================
         self.trader = trader
         self.handlers = {
-            "debug": lambda x: print(f"This is debuging with item: {x}"),
+            #"debug": lambda x: # print(f"This is debuging with item: {x}"),
             "check": self.trader.update_position,
             "stat1": self.trader.strategy1,
         }
@@ -345,9 +382,12 @@ class MainWorker:
                     self.coin_settings[pos['symbol']] = copy.deepcopy(self.default_setting)
 
             # update: remove coin in the setting list
+            new_setting = {}
             for coin in self.coin_settings.keys():
-                if coin not in [pos['symbol'] for pos in self.trader.positions]:
-                    del self.coin_settings[coin]
+                if coin in [pos['symbol'] for pos in self.trader.positions]:
+                    new_setting[pos['symbol']] = self.coin_settings[coin]
+            
+            self.coin_settings = new_setting
 
 
     def mainloop(self):
@@ -377,7 +417,12 @@ class MainWorker:
 
         except KeyboardInterrupt:
                 self.stop_event.set()
-                print("exit")
+                # update json file
+                with open('default.json', 'w') as setting_file:
+                    # update
+                    json.dump(self.default_setting, setting_file, ensure_ascii=False, indent=4)
+                # print("exit")
+
                 
 
     # destructor, kind of.
@@ -399,7 +444,7 @@ class MainWorker:
         return json.loads(data.decode("utf-8"))
 
     def do_get_request_task(self, result, data):
-        print(self.trader.positions)
+        # print(self.trader.positions)
         if data['what'] == 'symbols':
             result['symbols'] = [coin['symbol'] for coin in self.trader.positions]
         
@@ -410,19 +455,14 @@ class MainWorker:
 
     def do_set_request_task(self, result, data):
         if data['what'] == "default":            
-            # update json file
-            with open('default.json', 'w') as setting_file:
-                # nothing else to change except frquency.
-                with threading.Lock():
-                    self.default_setting['frequency'] = int(data['change'])
-
-                # update
-                json.dump(self.default_setting, setting_file, ensure_ascii=False, indent=4)
+            # nothing else to change except frquency.
+            with threading.Lock():
+                self.default_setting['frequency'] = int(data['change'])
 
         elif data['what'] in [pos['symbol'] for pos in self.trader.positions]:
             # do setting
             with threading.Lock():
-                print("setting changed!")
+                # print("setting changed!")
                 # update only not None setting
                 for key, val in self.coin_settings[data['what']].items():
                     if data['change'][key]:
@@ -443,7 +483,7 @@ class MainWorker:
         
         self.server_sock.settimeout(5)  # 주기적으로 stop_event 확인
         
-        print("Thread opened successful")
+        # print("Thread opened successful")
 
         while not stop_event.is_set():
             try:
@@ -469,7 +509,7 @@ class MainWorker:
                         # parse the request
                         match data['req']:
                             case 'get':
-                                print("doing getting")
+                                # print("doing getting")
                                 self.do_get_request_task(result, data)
                             case 'set':
                                 self.do_set_request_task(result, data)
@@ -479,12 +519,13 @@ class MainWorker:
                         client_sock.send(json.dumps(result, ensure_ascii=False).encode("utf-8"))
 
                 except (ConnectionError, json.JSONDecodeError) as e:
-                    print(f"[server] client disconnected: {e}")
+                    continue# print(f"[server] client disconnected: {e}")
                 finally:
-                    print("[server] session closed; waiting next client...")
+                    continue
+                    # print("[server] session closed; waiting next client...")
         else:
             self.exit()
-                    
+    
 
 # debugging purpose
 def main():
@@ -500,10 +541,10 @@ def main():
     with open("default.json", "r", encoding="utf-8") as default_json_file:
         default_setting = json.load(default_json_file)
 
-        print(json.dumps(default_setting, indent=3))
+        # print(json.dumps(default_setting, indent=3))
 
     # initialize the trader
-    trader = Trader(api_key, rsa_private_key, testnet=False)
+    trader = Trader(api_key, rsa_private_key, testnet=True)
     worker = MainWorker(trader, default_setting, logger=logging.getLogger(__name__))
 
     #worker.mainloop()

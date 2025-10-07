@@ -4,6 +4,7 @@ import time
 import socket
 import threading
 import struct
+import copy
 
 from dataclasses import dataclass
 from pybit.unified_trading import HTTP
@@ -183,25 +184,30 @@ class Trader:
         if self.success:
             return new_positions['result']['list']
     
-    def update_position(self, work_queue: PeekableQueue, current_task: QueueItem):
+    def update_position(self, work_queue: PeekableQueue, current_task: WorkItem, setting: dict[str, dict]):
         self.success, new_positions = successful(
             self.session.get_positions(category="linear", symbol=None, settleCoin="USDT")
         )
         # create list of only symbols of positions
         if self.success:
             # update positions
-            self.positions = new_positions['result']['list']
+            new_positions = new_positions['result']['list']
 
             # record new position for adding queue
-            for new_pos in self.positions:
-                newtask = CoinItem(Decimal(new_pos['avgPrice']), Decimal(new_pos['size']), new_pos['symbol'])
-                work_queue.put(newtask)
-        
+            for new_pos in new_positions:
+                # add to queue if new position is added
+                if new_pos['symbol'] not in [pos['symbol'] for pos in self.positions]:
+                    with threading.Lock():
+                        newtask = CoinItem(Decimal(new_pos['avgPrice']), Decimal(new_pos['size']), new_pos['symbol'], priority_time=setting['frequency'])
+                        work_queue.put(newtask)
+            
+            self.positions = new_positions
+
         print(f"This is checking position of doing{current_task}")
         print(f"Current positions: {[pos['symbol'] for pos in self.positions]}")
             
         # add checking position work back to queue
-        current_task.set_priority_time(5)
+        current_task.set_priority_time(setting['frequency'])
         work_queue.put(current_task)
                 
     # 선물 매매
@@ -234,9 +240,8 @@ class Trader:
     
 
     # 전략 구현
-    def strategy1(self, work_queue: PeekableQueue, current_task: QueueItem):
+    def strategy1(self, work_queue: PeekableQueue, current_task: CoinItem, setting: dict):
         print(f"This is strategy 1 with doing {current_task}")
-        current_task: CoinItem = current_task   # using child class pointer
 
         # final check before activate strategy
         # cur_pos = self.get_live_position(current_task.coin_name)
@@ -256,6 +261,28 @@ class Trader:
         # 시장가가 손절 가격 까지 가면 자동 손절. (또는 사용자가 수동으로 bybit웹/앱에서 손절 가능)
 
         # 그사이면 아무것도 안함
+
+        # read detail
+        #       
+        # if price < stoploss value:
+        #       sell future
+        #
+        # elif price > upper bound:
+        #       if short:
+        #               buy future # buy double quantity
+        #       else: #long
+        #               sell future # made a profit yeahee!
+        # elif price < lower bound:
+        #       if short:
+        #               # sell future # made a profit yeahee!
+        #       else: # long
+        #               buy future # buy double quantity
+        # else: # nothing happening price is between bounds
+        #   nothing
+
+        # put the task back to queue
+        current_task.set_priority_time(setting['frequency'])
+        work_queue.put(current_task)
 
 
 class MainWorker:
@@ -286,12 +313,26 @@ class MainWorker:
 
         # ======================== initialization =====================================
         # initialize the queue with checking position item
-        self.work_queue.put(WorkItem(5, "check"))
+        self.work_queue.put(WorkItem(self.default_setting['frequency'], "check"))
         self.stop_event = threading.Event()
 
         # create server thread
-        self.server_thread = threading.Thread(target=self.server_loop, args=[self.stop_event])
+        self.server_thread = threading.Thread(target=self.server_loop, args=[self.stop_event], daemon=True)
         self.server_thread.start()
+
+
+    def update_setting(self):
+        # udpate: add coin in the setting list
+        with threading.Lock():
+            for pos in self.trader.positions:
+                if pos['symbol'] not in self.coin_settings.keys():
+                    self.coin_settings[pos['symbol']] = copy.deepcopy(self.default_setting)
+
+            # update: remove coin in the setting list
+            for coin in self.coin_settings.keys():
+                if coin not in [pos['symbol'] for pos in self.trader.positions]:
+                    del self.coin_settings[coin]
+
 
     def mainloop(self):
         task: QueueItem
@@ -308,19 +349,15 @@ class MainWorker:
                     task = self.work_queue.get()
 
                     # call handler (and do stuff)
-                    self.handlers[task.get_handler()](self.work_queue, task)
+                    with threading.Lock():
+                        if isinstance(task, CoinItem):
+                            self.handlers[task.get_handler()](self.work_queue, task, self.coin_settings[task.coin_name])
+                        elif isinstance(task, WorkItem):
+                            self.handlers[task.get_handler()](self.work_queue, task, self.default_setting)
 
                     self.work_queue.task_done()
                 
-                # udpate: add coin in the setting list
-                for pos in self.trader.positions:
-                    if pos['symbol'] not in self.coin_settings.keys():
-                        self.coin_settings[pos['symbol']] = self.default_setting
-
-                # update: remove coin in the setting list
-                for coin in self.coin_settings.keys():
-                    if coin not in [pos['symbol'] for pos in self.trader.positions]:
-                        del self.coin_settings[coin]
+                self.update_setting()
 
         except KeyboardInterrupt:
                 self.stop_event.set()
@@ -351,7 +388,8 @@ class MainWorker:
             result['symbols'] = [coin['symbol'] for coin in self.trader.positions]
         
         else: # get coin setting
-            result['setting'] = self.coin_settings[data['what']]
+            with threading.Lock():
+                result['setting'] = self.coin_settings[data['what']]
             
 
     def do_set_request_task(self, result, data):
@@ -359,14 +397,28 @@ class MainWorker:
             # update json file
             with open('default.json', 'w') as setting_file:
                 # nothing else to change except frquency.
-                self.default_setting['frequency'] = int(data['change'])
+                with threading.Lock():
+                    self.default_setting['frequency'] = int(data['change'])
 
                 # update
                 json.dump(self.default_setting, setting_file, ensure_ascii=False, indent=4)
 
-        elif data['what'] in self.trader.positions:
+        elif data['what'] in [pos['symbol'] for pos in self.trader.positions]:
             # do setting
-            self.coin_settings[data['what']] = data['change']
+            with threading.Lock():
+                print("setting changed!")
+                # update only not None setting
+                for key, val in self.coin_settings[data['what']].items():
+                    if data['change'][key]:
+                        # if dict = upper bound, lower bound stop loss
+                        if isinstance(data['change'][key], dict):
+                            # update unit and value
+                            for in_key in val.keys():
+                                if data['change'][key][in_key]:
+                                    self.coin_settings[data['what']][key][in_key] = data['change'][key][in_key]
+                        # frequency, strategy
+                        else:
+                            self.coin_settings[data['what']][key] = data['change'][key]
 
 
     def server_loop(self, stop_event: threading.Event): # this server gonna be reply server
@@ -401,6 +453,7 @@ class MainWorker:
                         # parse the request
                         match data['req']:
                             case 'get':
+                                print("doing getting")
                                 self.do_get_request_task(result, data)
                             case 'set':
                                 self.do_set_request_task(result, data)

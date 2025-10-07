@@ -239,8 +239,10 @@ class Trader:
                 orderType=order_type,
                 qty=amount
             )
-        except pybit.exceptions.InvalidRequestError as e:
+        except pybit.exceptions.FailedRequestError:
             return
+        except pybit.exceptions.InvalidRequestError:
+            raise Exception
             # print(e)
 
         # return success
@@ -255,8 +257,10 @@ class Trader:
                 reduceOnly=True,
                 qty=qty
             )
-        except pybit.exceptions.InvalidRequestError as e:
+        except pybit.exceptions.FailedRequestError:
             return
+        except pybit.exceptions.InvalidRequestError:
+            raise Exception
             # print(e)
         # return success
     
@@ -382,9 +386,12 @@ class MainWorker:
                     self.coin_settings[pos['symbol']] = copy.deepcopy(self.default_setting)
 
             # update: remove coin in the setting list
+            new_setting = {}
             for coin in self.coin_settings.keys():
-                if coin not in [pos['symbol'] for pos in self.trader.positions]:
-                    del self.coin_settings[coin]
+                if coin in [pos['symbol'] for pos in self.trader.positions]:
+                    new_setting[coin] = self.coin_settings[coin]
+            
+            self.coin_settings = new_setting
 
 
     def mainloop(self):
@@ -414,12 +421,7 @@ class MainWorker:
 
         except KeyboardInterrupt:
                 self.stop_event.set()
-                # update json file
-                with open('default.json', 'w') as setting_file:
-                    # update
-                    json.dump(self.default_setting, setting_file, ensure_ascii=False, indent=4)
                 # print("exit")
-
                 
 
     # destructor, kind of.
@@ -455,6 +457,10 @@ class MainWorker:
             # nothing else to change except frquency.
             with threading.Lock():
                 self.default_setting['frequency'] = int(data['change'])
+                # update json file
+                with open('default.json', 'w') as setting_file:
+                    # update
+                    json.dump(self.default_setting, setting_file, ensure_ascii=False, indent=4)
 
         elif data['what'] in [pos['symbol'] for pos in self.trader.positions]:
             # do setting

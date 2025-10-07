@@ -18,15 +18,17 @@ class PeekableQueue(PriorityQueue):
     
     def _get(self):
         ret = super()._get()
-        if not self.queue:  # no element in queue => no last
-            self.last = None
+        with self.mutex:
+            if not self.queue:  # no element in queue => no last
+                self.last = None
         return ret
 
     def decrease(self, sub):
         "decrease the all priority values in the queue by sub"
-        for item in self.queue:
-            if item:
-                item -= sub
+        with self.mutex:
+            for item in self.queue:
+                if item:
+                    item -= sub
 
     def peek_first(self):
         with self.mutex:

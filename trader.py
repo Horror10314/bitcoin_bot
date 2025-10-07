@@ -194,7 +194,7 @@ class Trader:
             )
         except requests.exceptions.ReadTimeout as e:
             # print("Timeout Error: wait for next time")
-            current_task.set_priority_time(setting['frequency'])
+            current_task.set_priority_time(3)
             work_queue.put(current_task)
             return
 
@@ -366,7 +366,7 @@ class MainWorker:
 
         # ======================== initialization =====================================
         # initialize the queue with checking position item
-        self.work_queue.put(WorkItem(self.default_setting['frequency'], "check"))
+        self.work_queue.put(WorkItem(0, "check"))
         self.stop_event = threading.Event()
 
         # create server thread
@@ -382,12 +382,9 @@ class MainWorker:
                     self.coin_settings[pos['symbol']] = copy.deepcopy(self.default_setting)
 
             # update: remove coin in the setting list
-            new_setting = {}
             for coin in self.coin_settings.keys():
-                if coin in [pos['symbol'] for pos in self.trader.positions]:
-                    new_setting[pos['symbol']] = self.coin_settings[coin]
-            
-            self.coin_settings = new_setting
+                if coin not in [pos['symbol'] for pos in self.trader.positions]:
+                    del self.coin_settings[coin]
 
 
     def mainloop(self):

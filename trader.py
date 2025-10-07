@@ -124,11 +124,12 @@ class WorkItem(QueueItem):
 
 
 class CoinItem(QueueItem):
-    def __init__(self, coin_entry_price: Decimal, coin_qty: Decimal, coin_name: str, priority_time: int = 2, handler: str = "stat1"):
+    def __init__(self, coin_entry_price: Decimal, coin_qty: Decimal, coin_name: str, long: bool, priority_time: int = 2, handler: str = "stat1"):
         super().__init__(priority_time, handler)
         self.coin_name = coin_name
         self.coin_qty = coin_qty
         self.coin_entry_price = coin_entry_price
+        self.long = long
     
     def __str__(self):
         return super().__str__() + f", coin entry price {self.coin_entry_price}, coin qty {self.coin_qty}, and coin name {self.coin_name}"
@@ -198,7 +199,7 @@ class Trader:
                 # add to queue if new position is added
                 if new_pos['symbol'] not in [pos['symbol'] for pos in self.positions]:
                     with threading.Lock():
-                        newtask = CoinItem(Decimal(new_pos['avgPrice']), Decimal(new_pos['size']), new_pos['symbol'], priority_time=setting['frequency'])
+                        newtask = CoinItem(Decimal(new_pos['avgPrice']), Decimal(new_pos['size']), new_pos['symbol'], new_pos['side'] == "Buy", priority_time=setting['frequency'])
                         work_queue.put(newtask)
             
             self.positions = new_positions
@@ -242,13 +243,7 @@ class Trader:
     # 전략 구현
     def strategy1(self, work_queue: PeekableQueue, current_task: CoinItem, setting: dict):
         print(f"This is strategy 1 with doing {current_task}")
-
-        # final check before activate strategy
-        # cur_pos = self.get_live_position(current_task.coin_name)
-        # if Decimal(cur_pos['size']) == 0:
-        #     return
         
-        # ======= TODO =========
         # 내가 구입한 가격 얻기 
         # 내가 구입한 코인의 qty얻기
         # 현재 시장가 얻기
@@ -261,24 +256,45 @@ class Trader:
         # 시장가가 손절 가격 까지 가면 자동 손절. (또는 사용자가 수동으로 bybit웹/앱에서 손절 가능)
 
         # 그사이면 아무것도 안함
+        pos = self.get_live_position(current_task.coin_name)
 
-        # read detail
-        #       
-        # if price < stoploss value:
-        #       sell future
-        #
-        # elif price > upper bound:
-        #       if short:
-        #               buy future # buy double quantity
-        #       else: #long
-        #               sell future # made a profit yeahee!
-        # elif price < lower bound:
-        #       if short:
-        #               # sell future # made a profit yeahee!
-        #       else: # long
-        #               buy future # buy double quantity
-        # else: # nothing happening price is between bounds
-        #   nothing
+        if Decimal(pos['size']) > 0:
+
+            # calculate price
+            upperbound_price = current_task.coin_entry_price + Decimal(setting['upperbound']['value'])\
+                                if setting['upperbound']['unit'] == "$"\
+                                else current_task.coin_entry_price + current_task.coin_entry_price * Decimal(setting['upperbound']['value']) /100
+            
+            lowerbound_price = current_task.coin_entry_price + Decimal(setting['lowerbound']['value'])\
+                                if setting['lowerbound']['unit'] == "$"\
+                                else current_task.coin_entry_price + current_task.coin_entry_price * Decimal(setting['lowerbound']['value']) /100
+            
+            stoploss_price = current_task.coin_entry_price - Decimal(setting['stoploss']['value']) \
+                                if setting['stoploss']['unit'] == "$"\
+                                else current_task.coin_entry_price - current_task.coin_entry_price * Decimal(setting['stoploss']['value']) / 100
+
+            cur_price = Decimal(pos['markPrice'])
+
+
+            # execute strategy
+            if cur_price < stoploss_price:  
+                self.sell_coin_future(current_task.coin_name)
+            elif cur_price > upperbound_price:
+                if current_task.long:   
+                    # made a profit
+                    self.sell_coin_future(current_task.coin_name)
+                else:
+                    # continue
+                    self.buy_coin_future(current_task.coin_name, str(current_task.coin_qty * 2))
+            elif cur_price < lowerbound_price:
+                if current_task.long:
+                    #continue
+                    self.buy_coin_future(current_task.coin_name, str(current_task.coin_qty * 2))
+                else: 
+                    # made a profit
+                    self.sell_coin_future(current_task.coin_name)
+            # else:
+            #     do nothing
 
         # put the task back to queue
         current_task.set_priority_time(setting['frequency'])

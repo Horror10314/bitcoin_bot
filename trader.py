@@ -284,11 +284,11 @@ class Trader:
                     # made a profit
                     self.sell_coin_future(current_task.coin_name)
                 else:
-                    # continue
+                    # continue strategy
                     self.buy_coin_future(current_task.coin_name, str(current_task.coin_qty * 2))
             elif cur_price < lowerbound_price:
                 if current_task.long:
-                    #continue
+                    #continue continue strategy
                     self.buy_coin_future(current_task.coin_name, str(current_task.coin_qty * 2))
                 else: 
                     # made a profit
